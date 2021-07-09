@@ -14,12 +14,13 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
-%% Supervision tree for the shards
--module(ekka_rlog_sup).
+%% Top level supervisor for the RLOG tree, that starts the persistent
+%% processes.
+-module(ekka_rlog_top_sup).
 
 -behaviour(supervisor).
 
--export([init/1, start_link/0, find_shard/1, start_shard/1]).
+-export([init/1, start_link/0]).
 
 -define(SUPERVISOR, ?MODULE).
 
@@ -31,71 +32,52 @@
 %%================================================================================
 
 start_link() ->
-    Shards = application:get_env(ekka, rlog_startup_shards, []),
     Role = ekka_rlog:role(),
-    supervisor:start_link({local, ?SUPERVISOR}, ?MODULE, [Role, Shards]).
-
--spec find_shard(ekka_rlog:shard()) -> {ok, pid()} | undefined.
-find_shard(Shard) ->
-    Children = [Child || {Id, Child, _, _} <- supervisor:which_children(?SUPERVISOR), Id =:= Shard],
-    case Children of
-        [Pid] when is_pid(Pid) ->
-            {ok, Pid};
-        _ ->
-            undefined
-    end.
-
-%% @doc Add shard dynamically
--spec start_shard(ekka_rlog:shard()) -> {ok, pid()}
-                                      | {error, _}.
-start_shard(Shard) ->
-    _ = ekka_rlog_config:shard_config(Shard),
-    ?tp(info, "Starting RLOG shard",
-        #{ shard => Shard
-         }),
-    Child = case ekka_rlog:role() of
-                core -> shard_sup(Shard);
-                replicant -> replicant_worker(Shard)
-            end,
-    supervisor:start_child(?SUPERVISOR, Child).
+    supervisor:start_link({local, ?SUPERVISOR}, ?MODULE, Role).
 
 %%================================================================================
 %% supervisor callbacks
 %%================================================================================
 
-init([core, Shards]) ->
-    %% Shards should be restarted individually to avoid bootstrapping
-    %% of too many replicants simulataneously, hence `one_for_one':
-    SupFlags = #{ strategy => one_for_one
-                , intensity => 100
+init(core) ->
+    SupFlags = #{ strategy => one_for_all
+                , intensity => 1
                 , period => 1
                 },
-    Children = lists:map(fun shard_sup/1, Shards),
+    Children = [status_mgr(), child_sup()],
     {ok, {SupFlags, Children}};
-init([replicant, Shards]) ->
-    SupFlags = #{ strategy => one_for_one
-                , intensity => 100
+init(replicant) ->
+    SupFlags = #{ strategy => one_for_all
+                , intensity => 1
                 , period => 1
                 },
-    Children = lists:map(fun replicant_worker/1, Shards),
+    Children = [status_mgr(), core_node_lb(), child_sup()],
     {ok, {SupFlags, Children}}.
 
 %%================================================================================
 %% Internal functions
 %%================================================================================
 
-shard_sup(Shard) ->
-    #{ id => Shard
-     , start => {ekka_rlog_shard_sup, start_link, [Shard]}
-     , restart => permanent
-     , shutdown => infinity
-     , type => supervisor
-     }.
-
-replicant_worker(Shard) ->
-    #{ id => Shard
-     , start => {ekka_rlog_replica, start_link, [Shard]}
+status_mgr() ->
+    #{ id => ekka_rlog_status
+     , start => {ekka_rlog_status, start_link, []}
      , restart => permanent
      , shutdown => 5000
      , type => worker
+     }.
+
+core_node_lb() ->
+    #{ id => ekka_rlog_lb
+     , start => {ekka_rlog_lb, start_link, []}
+     , restart => permanent
+     , shutdown => 5000
+     , type => worker
+     }.
+
+child_sup() ->
+    #{ id => ekka_rlog_sup
+     , start => {ekka_rlog_sup, start_link, []}
+     , restart => permanent
+     , shutdown => infinity
+     , type => supervisor
      }.

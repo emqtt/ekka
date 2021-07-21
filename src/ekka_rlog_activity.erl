@@ -45,7 +45,7 @@ ro_transaction(Fun) ->
     assert_ro(),
     Ret.
 
--spec clear_table(ekka_rlog_lib:table()) -> ok.
+-spec clear_table(ekka_mnesia:table()) -> ok.
 clear_table(Tab) ->
     case get(mnesia_activity_state) of
         {mnesia, Tid, Ts}  ->

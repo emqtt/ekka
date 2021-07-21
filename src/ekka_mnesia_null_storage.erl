@@ -130,9 +130,9 @@ index_is_consistent(_Alias, _IxTag, _Bool) ->
 init_backend() ->
     ok.
 
-info(_Alias, Tab, memory) ->
+info(_Alias, _Tab, memory) ->
     0;
-info(Alias, Tab, size) ->
+info(_Alias, _Tab, size) ->
     0;
 info(_Alias, _Info, _Item) ->
     nobody_here_but_us_chicken.

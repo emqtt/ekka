@@ -49,6 +49,7 @@
         , delete_schema/0
         , del_schema_copy/1
         , create_table/2
+        , create_table_internal/2
         , copy_table/1
         , copy_table/2
         ]).
@@ -70,6 +71,7 @@
 
 -export_type([ t_result/1
              , backend/0
+             , table/0
              ]).
 
 -deprecated({copy_table, 1, next_major_release}).
@@ -77,6 +79,8 @@
 -type t_result(Res) :: {'atomic', Res} | {'aborted', Reason::term()}.
 
 -type backend() :: rlog | mnesia.
+
+-type table():: atom().
 
 %%--------------------------------------------------------------------
 %% Start and init mnesia
@@ -139,8 +143,10 @@ init_tables() ->
               end,
     case (ekka_rlog:role() =:= replicant) orelse IsAlone of
         true ->
+            ekka_rlog_schema:init(boot),
             create_tables();
         false ->
+            ekka_rlog_schema:init(copy),
             copy_tables()
     end.
 
@@ -153,8 +159,23 @@ copy_tables() ->
     ekka_boot:apply_module_attributes(copy_mnesia).
 
 %% @doc Create mnesia table.
--spec(create_table(Name:: atom(), TabDef :: list()) -> ok | {error, any()}).
+-spec(create_table(Name:: table(), TabDef :: list()) -> ok | {error, any()}).
 create_table(Name, TabDef) ->
+    case proplists:get_value(rlog_shard, TabDef) of
+        undefined ->
+            %% Perhaps the shard has been declared already?
+            case ekka_rlog_schema:shard_of_table(Name) of
+                {ok, _}   -> ok;
+                undefined -> ?LOG(warning, "Table ~p doesn't belong to any RLOG shard.", [Name])
+            end;
+        Shard ->
+            ekka_rlog_schema:add_table(Shard, Name)
+    end,
+    create_table_internal(Name, lists:keydelete(rlog_shard, 1, TabDef)).
+
+%% @doc Create mnesia table (skip RLOG stuff)
+-spec(create_table_internal(Name:: atom(), TabDef :: list()) -> ok | {error, any()}).
+create_table_internal(Name, TabDef) ->
     ensure_tab(mnesia:create_table(Name, TabDef)).
 
 %% @doc Copy mnesia table.
@@ -429,7 +450,7 @@ transaction(Shard, Fun, Args) ->
 transaction(Shard, Fun) ->
     transaction(Shard, fun erlang:apply/2, [Fun, []]).
 
--spec clear_table(ekka_rlog_lib:table()) -> t_result(ok).
+-spec clear_table(ekka_mnesia:table()) -> t_result(ok).
 clear_table(Table) ->
     Shard = ekka_rlog_config:shard_rlookup(Table),
     ekka_rlog_lib:call_backend_rw_trans(Shard, clear_table, [Table]).
@@ -438,19 +459,19 @@ clear_table(Table) ->
 dirty_write(Record) ->
     dirty_write(element(1, Record), Record).
 
--spec dirty_write(ekka_rlog_lib:table(), tuple()) -> ok.
+-spec dirty_write(ekka_mnesia:table(), tuple()) -> ok.
 dirty_write(Tab, Record) ->
     ekka_rlog_lib:call_backend_rw_dirty(dirty_write, Tab, [Record]).
 
--spec dirty_delete(ekka_rlog_lib:table(), term()) -> ok.
+-spec dirty_delete(ekka_mnesia:table(), term()) -> ok.
 dirty_delete(Tab, Key) ->
     ekka_rlog_lib:call_backend_rw_dirty(dirty_delete, Tab, [Key]).
 
--spec dirty_delete({ekka_rlog_lib:table(), term()}) -> ok.
+-spec dirty_delete({ekka_mnesia:table(), term()}) -> ok.
 dirty_delete({Tab, Key}) ->
     dirty_delete(Tab, Key).
 
--spec dirty_delete_object(ekka_rlog_lib:table(), term()) -> ok.
+-spec dirty_delete_object(ekka_mnesia:table(), term()) -> ok.
 dirty_delete_object(Tab, Key) ->
     ekka_rlog_lib:call_backend_rw_dirty(dirty_delete_object, Tab, [Key]).
 

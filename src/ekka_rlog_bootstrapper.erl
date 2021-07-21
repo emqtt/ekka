@@ -18,6 +18,8 @@
 
 -module(ekka_rlog_bootstrapper).
 
+-behavior(gen_server).
+
 %% API:
 -export([start_link/2, start_link_client/3]).
 
@@ -40,7 +42,7 @@
 %%================================================================================
 
 -type batch() :: { _From    :: pid()
-                 , _Table   :: ekka_rlog_lib:table()
+                 , _Table   :: ekka_mnesia:table()
                  , _Records :: [tuple()]
                  }.
 
@@ -48,7 +50,7 @@
         { shard       :: ekka_rlog:shard()
         , subscriber  :: ekka_rlog_lib:subscriber()
         , key_queue   :: replayq:q() | undefined
-        , tables      :: [ekka_rlog_lib:table()]
+        , tables      :: [ekka_mnesia:table()]
         }).
 
 -record(client,
@@ -167,7 +169,7 @@ start_table_traverse(St = #server{tables = [], subscriber = Subscriber}) ->
     _ = complete(Subscriber, self(), ekka_rlog_lib:approx_checkpoint()),
     {stop, normal, St};
 start_table_traverse(St0 = #server{ shard = Shard
-                                  , tables = [Table|Rest]
+                                  , tables = [Table|_Rest]
                                   , key_queue = Q0
                                   }) ->
     ?tp(info, start_shard_table_bootstrap,
@@ -204,7 +206,7 @@ traverse_queue(St0 = #server{key_queue = Q0, subscriber = Subscriber, tables = [
             {stop, normal, St0}
     end.
 
--spec prepare_batch(ekka_rlog_lib:table(), list()) -> [tuple()].
+-spec prepare_batch(ekka_mnesia:table(), list()) -> [tuple()].
 prepare_batch(Table, Keys) ->
     lists:foldl( fun(Key, Acc) -> mnesia:dirty_read(Table, Key) ++ Acc end
                , []

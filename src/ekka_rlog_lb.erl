@@ -85,7 +85,7 @@ terminate(_Reason, St) ->
 %%================================================================================
 
 do_update() ->
-    [do_update(Shard) || Shard <- ekka_rlog_config:shards()],
+    [do_update(Shard) || Shard <- ekka_rlog_schema:shards()],
     Interval = application:get_env(ekka, rlog_lb_update_interval, 1000),
     erlang:send_after(Interval, self(), ?update).
 

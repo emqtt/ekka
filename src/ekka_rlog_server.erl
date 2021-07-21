@@ -44,6 +44,7 @@
 -export_type([checkpoint/0]).
 
 -include_lib("snabbkaffe/include/trace.hrl").
+-include("ekka_rlog.hrl").
 
 %%================================================================================
 %% Type declarations
@@ -77,12 +78,12 @@ probe(Node, Shard) ->
     ekka_rlog_lib:rpc_call(Node, ?MODULE, do_probe, [Shard]) =:= true.
 
 -spec subscribe(ekka_rlog:shard(), ekka_rlog_lib:subscriber(), checkpoint()) ->
-          {_NeedBootstrap :: boolean(), _Agent :: pid()}.
+          {ok, _NeedBootstrap :: boolean(), _Agent :: pid(), [ekka_mnesia:table()]}.
 subscribe(Shard, Subscriber, Checkpoint) ->
     gen_server:call(Shard, {subscribe, Subscriber, Checkpoint}, infinity).
 
 -spec bootstrap_me(node(), ekka_rlog:shard()) -> {ok, pid()}
-              | {error, term()}.
+                                               | {error, term()}.
 bootstrap_me(RemoteNode, Shard) ->
     Me = {node(), self()},
     case ekka_rlog_lib:rpc_call(RemoteNode, ?MODULE, do_bootstrap, [Shard, Me]) of
@@ -104,11 +105,26 @@ init({Parent, Shard}) ->
 handle_info({'DOWN', _MRef, process, Pid, _Info}, St) ->
     ekka_rlog_status:notify_agent_disconnect(Pid),
     {noreply, St};
+handle_info({mnesia_table_event, Event}, St) ->
+    #s{shard = Shard} = St,
+    case Event of
+        {write, #?schema{mnesia_table = Tab, shard = Shard}, _ActivityId} ->
+            ?tp(notice, "Shard schema change",
+                #{ shard     => Shard
+                 , new_table => Tab
+                 }),
+            ekka_rlog_sup:restart_shard(Shard, schema_change);
+        _ ->
+            ok
+    end,
+    {noreply, St};
 handle_info(_Info, St) ->
     {noreply, St}.
 
 handle_continue(post_init, {Parent, Shard}) ->
-    #{tables := Tables} = ekka_rlog_config:shard_config(Shard),
+    ok = ekka_rlog_tab:ensure_table(Shard),
+    Tables = process_schema(Shard),
+    ekka_rlog_config:load_shard_config(Shard, Tables),
     AgentSup = ekka_rlog_shard_sup:start_agent_sup(Parent, Shard),
     BootstrapperSup = ekka_rlog_shard_sup:start_bootstrapper_sup(Parent, Shard),
     mnesia:wait_for_tables([Shard|Tables], 100000),
@@ -140,7 +156,8 @@ handle_call({subscribe, Subscriber, Checkpoint}, _From, State) ->
     Pid = maybe_start_child(AgentSup, [Subscriber, ReplaySince]),
     monitor(process, Pid),
     ekka_rlog_status:notify_agent_connect(Shard, ekka_rlog_lib:subscriber_node(Subscriber), Pid),
-    {reply, {ok, NeedBootstrap, Pid}, State};
+    Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    {reply, {ok, NeedBootstrap, Pid, Tables}, State};
 handle_call({bootstrap, Subscriber}, _From, State) ->
     Pid = maybe_start_child(State#s.bootstrapper_sup, [Subscriber]),
     {reply, {ok, Pid}, State};
@@ -182,6 +199,13 @@ maybe_start_child(Supervisor, Args) ->
         {ok, Pid, _} -> Pid;
         {error, {already_started, Pid}} -> Pid
     end.
+
+-spec process_schema(ekka_rlog:shard()) -> [ekka_mnesia:table()].
+process_schema(Shard) ->
+    ok = mnesia:wait_for_tables([?schema], infinity),
+    mnesia:subscribe({table, ?schema, simple}),
+    Tables = ekka_rlog_schema:tables_of_shard(Shard),
+    Tables.
 
 %%================================================================================
 %% Internal exports (gen_rpc)

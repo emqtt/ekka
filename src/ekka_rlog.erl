@@ -44,7 +44,7 @@
 
 -type role() :: core | replicant.
 
--type shard_config() :: #{ tables := [ekka_rlog_lib:table()]
+-type shard_config() :: #{ tables := [ekka_mnesia:table()]
                          , match_spec := ets:match_spec()
                          }.
 
@@ -62,7 +62,7 @@ status() ->
             Info0;
         {rlog, replicant} ->
             Stats = [{I, ekka_rlog_status:get_shard_stats(I)}
-                     || I <- ekka_rlog_config:shards()],
+                     || I <- ekka_rlog_schema:shards()],
             Info0#{ shards_in_sync => ekka_rlog_status:shards_up()
                   , shards_down    => ekka_rlog_status:shards_down()
                   , shard_stats    => maps:from_list(Stats)
@@ -111,7 +111,7 @@ ensure_shard(Shard) ->
     end.
 
 -spec subscribe(ekka_rlog:shard(), node(), pid(), ekka_rlog_server:checkpoint()) ->
-          {ok, _NeedBootstrap :: boolean(), _Agent :: pid()}
+          {ok, _NeedBootstrap :: boolean(), _Agent :: pid(), [ekka_mnesia:table()]}
         | {badrpc | badtcp, term()}.
 subscribe(Shard, RemoteNode, Subscriber, Checkpoint) ->
     case ekka_rlog_server:probe(RemoteNode, Shard) of

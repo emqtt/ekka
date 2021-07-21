@@ -19,7 +19,7 @@
 
 -behaviour(supervisor).
 
--export([init/1, start_link/0, find_shard/1, start_shard/1]).
+-export([init/1, start_link/0, find_shard/1, start_shard/1, restart_shard/2]).
 
 -define(SUPERVISOR, ?MODULE).
 
@@ -49,7 +49,6 @@ find_shard(Shard) ->
 -spec start_shard(ekka_rlog:shard()) -> {ok, pid()}
                                       | {error, _}.
 start_shard(Shard) ->
-    _ = ekka_rlog_config:shard_config(Shard),
     ?tp(info, "Starting RLOG shard",
         #{ shard => Shard
          }),
@@ -58,6 +57,16 @@ start_shard(Shard) ->
                 replicant -> replicant_worker(Shard)
             end,
     supervisor:start_child(?SUPERVISOR, Child).
+
+%% @doc Restart a shard
+-spec restart_shard(ekka_rlog:shard(), _Reason) -> ok.
+restart_shard(Shard, Reason) ->
+    ?tp(notice, "Restarting RLOG shard",
+        #{ shard  => Shard
+         , reason => Reason
+         }),
+    {ok, _} = supervisor:restart_child(?SUPERVISOR, Shard),
+    ok.
 
 %%================================================================================
 %% supervisor callbacks

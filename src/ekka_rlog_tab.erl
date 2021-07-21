@@ -19,7 +19,7 @@
 -module(ekka_rlog_tab).
 
 %% Mnesia bootstrap
--export([mnesia/1]).
+-export([mnesia/1, ensure_table/1]).
 
 -export([write/3]).
 
@@ -33,22 +33,11 @@
 -copy_mnesia({mnesia, [copy]}).
 
 %% @doc Mnesia bootstrap.
-mnesia(BootType) ->
-    {ok, _} = ekka_mnesia_null_storage:register(),
-    case ekka_rlog:role() of
-        core -> [init(BootType, Shard) || Shard <- ekka_rlog_config:shards()], ok;
-        _    -> ok
-    end.
+mnesia(_BootType) ->
+    {ok, _} = ekka_mnesia_null_storage:register().
 
-%% @doc Write a transaction log.
--spec write(ekka_rlog:shard(), ekka_rlog_lib:txid(), [ekka_rlog_lib:op(),...]) -> ok.
-write(Shard, Key, [_ | _] = Ops) ->
-    Log = #rlog{ key = Key
-               , ops = Ops
-               },
-    mnesia:write(Shard, Log, write).
-
-init(boot, Shard) ->
+%% @doc Create or copy shard table
+ensure_table(Shard) ->
     Opts = [ {type, ordered_set}
            , {record_name, rlog}
            , {attributes, record_info(fields, rlog)}
@@ -57,13 +46,14 @@ init(boot, Shard) ->
     ?tp(notice, creating_rlog_tab,
         #{ node => node()
          , shard => Shard
-         , type => boot
          }),
-    ok = ekka_mnesia:create_table(Shard, Opts);
-init(copy, Shard) ->
-    ?tp(notice, creating_rlog_tab,
-        #{ node => node()
-         , shard => Shard
-         , type => copy
-         }),
+    ok = ekka_mnesia:create_table_internal(Shard, Opts),
     ok = ekka_mnesia:copy_table(Shard, null_copies).
+
+%% @doc Write a transaction log.
+-spec write(ekka_rlog:shard(), ekka_rlog_lib:txid(), [ekka_rlog_lib:op(),...]) -> ok.
+write(Shard, Key, [_ | _] = Ops) ->
+    Log = #rlog{ key = Key
+               , ops = Ops
+               },
+    mnesia:write(Shard, Log, write).

@@ -287,18 +287,20 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
         #{ node => node()
          }),
     case try_connect(Shard, Checkpoint) of
-        {ok, _BootstrapNeeded = true, Node, ConnPid} ->
+        {ok, _BootstrapNeeded = true, Node, ConnPid, Tables} ->
             D = #d{ shard            = Shard
                   , agent            = ConnPid
                   , remote_core_node = Node
                   },
+            ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?bootstrap, D};
-        {ok, _BootstrapNeeded = false, Node, ConnPid} ->
+        {ok, _BootstrapNeeded = false, Node, ConnPid, Tables} ->
             D = #d{ shard            = Shard
                   , agent            = ConnPid
                   , remote_core_node = Node
                   , checkpoint       = Checkpoint
                   },
+            ekka_rlog_config:load_shard_config(Shard, Tables),
             {next_state, ?normal, D};
         {error, Err} ->
             ReconnectTimeout = application:get_env(ekka, rlog_replica_reconnect_interval, 5000),
@@ -306,13 +308,13 @@ handle_reconnect(#d{shard = Shard, checkpoint = Checkpoint}) ->
     end.
 
 -spec try_connect(ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
-                {ok, boolean(), node(), pid()}
+                {ok, boolean(), node(), pid(), [ekka_mnesia:table()]}
               | {error, term()}.
 try_connect(Shard, Checkpoint) ->
     try_connect(ekka_rlog_lib:shuffle(ekka_rlog:core_nodes()), Shard, Checkpoint).
 
 -spec try_connect([node()], ekka_rlog:shard(), ekka_rlog_server:checkpoint()) ->
-                {ok, boolean(), node(), pid()}
+                {ok, boolean(), node(), pid(), [ekka_mnesia:table()]}
               | {error, term()}.
 try_connect([], _, _) ->
     {error, no_core_available};
@@ -321,9 +323,9 @@ try_connect([Node|Rest], Shard, Checkpoint) ->
         #{ node => Node
          }),
     case ekka_rlog:subscribe(Shard, Node, self(), Checkpoint) of
-        {ok, NeedBootstrap, Agent} ->
+        {ok, NeedBootstrap, Agent, Tables} ->
             link(Agent),
-            {ok, NeedBootstrap, Node, Agent};
+            {ok, NeedBootstrap, Node, Agent, Tables};
         Err ->
             ?tp(warning, "Failed to connect to the core node",
                 #{ node => Node

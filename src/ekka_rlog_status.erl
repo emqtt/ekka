@@ -206,7 +206,7 @@ objects_up(Tag) ->
 
 -spec shards_down() -> [ekka_rlog:shard()].
 shards_down() ->
-    ekka_rlog_config:shards() -- shards_up().
+    ekka_rlog_schema:shards() -- shards_up().
 
 -spec get_shard_stats(ekka_rlog:shard()) -> map().
 get_shard_stats(Shard) ->

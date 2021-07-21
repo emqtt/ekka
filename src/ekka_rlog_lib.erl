@@ -41,7 +41,6 @@
 
 -export_type([ tlog_entry/0
              , subscriber/0
-             , table/0
              , change_type/0
              , op/0
              , tx/0
@@ -61,11 +60,9 @@
 -type mnesia_tid() :: #tid{}.
 -type txid() :: {ekka_rlog_server:checkpoint(), pid()}.
 
--type table():: atom().
-
 -type change_type() :: write | delete | delete_object | clear_table.
 
--type op() :: {{table(), term()}, term(), change_type()}.
+-type op() :: {{ekka_mnesia:table(), term()}, term(), change_type()}.
 
 -type dirty() :: {dirty, _Fun :: atom(), _Args :: list()}.
 
@@ -222,7 +219,7 @@ call_backend_rw_trans(Shard, Function, Args) ->
             ekka_rlog_lib:rpc_call(Core, ?MODULE, transactional_wrapper, [Shard, Function, Args])
     end.
 
--spec call_backend_rw_dirty(atom(), ekka_rlog_lib:table(), list()) -> term().
+-spec call_backend_rw_dirty(atom(), ekka_mnesia:table(), list()) -> term().
 call_backend_rw_dirty(Function, Table, Args) ->
     case {ekka_rlog:backend(), ekka_rlog:role()} of
         {mnesia, core} ->
@@ -254,7 +251,7 @@ transactional_wrapper(Shard, Fun, Args) ->
     mnesia:transaction(TxFun).
 
 %% @doc Perform a dirty operation and log changes.
--spec dirty_wrapper(atom(), ekka_rlog_lib:table(), list()) -> ok.
+-spec dirty_wrapper(atom(), ekka_mnesia:table(), list()) -> ok.
 dirty_wrapper(Fun, Table, Args) ->
     Ret = apply(mnesia, Fun, [Table|Args]),
     case ekka_rlog_config:shard_rlookup(Table) of
@@ -305,7 +302,7 @@ ensure_no_ops_outside_shard(TxStore, Shard) ->
     end.
 
 do_ensure_no_ops_outside_shard(TxStore, Shard) ->
-    Shards = ekka_rlog_config:shards(),
-    Ops = lists:append([dig_ops_for_shard(TxStore, Shard) || Shard <- Shards -- [Shard]]),
+    Shards = ekka_rlog_schema:shards(),
+    Ops = lists:append([dig_ops_for_shard(TxStore, S) || S <- Shards -- [Shard]]),
     [] = Ops, % Asset
     ok.
